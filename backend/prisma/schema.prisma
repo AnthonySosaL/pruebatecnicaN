@@ -1,0 +1,64 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ClientType {
+  NATURAL_PERSON  // Persona Natural
+  COMPANY         // Empresa
+}
+
+enum DocumentType {
+  CEDULA          // Cédula de Identidad
+  RUC             // Registro Único de Contribuyentes
+}
+
+model Client {
+  id        String      @id @default(uuid())
+  type      ClientType
+  
+  // Datos comunes
+  name      String
+  email     String      @unique
+  phone     String?
+  address   String?
+  
+  // Datos específicos para persona natural
+  lastName  String?
+  
+  // Datos específicos para empresa
+  legalName String?
+  
+  // Relaciones
+  documents Document[]
+  
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  
+  @@index([email])
+  @@index([type])
+}
+
+model Document {
+  id            String        @id @default(uuid())
+  type          DocumentType
+  documentNumber String
+  
+  // URLs de las imágenes en S3
+  frontImageUrl  String
+  backImageUrl   String?
+  
+  // Metadatos
+  uploadedAt    DateTime      @default(now())
+  
+  // Relación con cliente
+  clientId      String
+  client        Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  
+  @@unique([clientId, type])
+  @@index([documentNumber])
+}
