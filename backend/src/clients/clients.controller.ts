@@ -10,10 +10,12 @@ import {
   UploadedFiles,
   Query,
   ParseUUIDPipe,
+  BadRequestException,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiOperation, ApiConsumes, ApiQuery, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiConsumes, ApiQuery, ApiResponse, ApiBody } from '@nestjs/swagger';
 import { ClientsService } from './clients.service';
+import { CedulaValidatorService } from './cedula-validator.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { QueryClientDto } from './dto/query-client.dto';
@@ -21,7 +23,39 @@ import { QueryClientDto } from './dto/query-client.dto';
 @ApiTags('clients')
 @Controller('api/clients')
 export class ClientsController {
-  constructor(private readonly clientsService: ClientsService) {}
+  constructor(
+    private readonly clientsService: ClientsService,
+    private readonly cedulaValidator: CedulaValidatorService,
+  ) {}
+
+  @Post('validate-cedula')
+  @ApiOperation({ summary: 'Validar cédula ecuatoriana (servicio que puede fallar)' })
+  @ApiBody({ 
+    schema: { 
+      properties: { 
+        documentNumber: { type: 'string', example: '1234567890' } 
+      } 
+    } 
+  })
+  async validateCedula(@Body('documentNumber') documentNumber: string) {
+    if (!documentNumber || documentNumber.length !== 10) {
+      throw new BadRequestException('Número de cédula debe tener 10 dígitos');
+    }
+
+    try {
+      const result = await this.cedulaValidator.validateCedula(documentNumber);
+      return {
+        success: true,
+        ...result
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        valid: false,
+        message: error.message
+      };
+    }
+  }
 
   @Post()
   @ApiOperation({ summary: 'Crear un nuevo cliente con su documento' })

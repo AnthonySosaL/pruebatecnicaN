@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
 
 @Injectable()
@@ -31,7 +32,6 @@ export class S3Service {
         secretAccessKey,
       },
       forcePathStyle: true,
-      tls: true,
     });
   }
 
@@ -39,31 +39,36 @@ export class S3Service {
     const fileExtension = file.originalname.split('.').pop();
     const fileName = `${folder}/${randomUUID()}.${fileExtension}`;
 
-    try {
-      const command = new PutObjectCommand({
-        Bucket: this.bucketName,
-        Key: fileName,
-        Body: file.buffer,
-        ContentType: file.mimetype,
-        ACL: 'public-read', // Intentar con permisos públicos
-      });
+    const command = new PutObjectCommand({
+      Bucket: this.bucketName,
+      Key: fileName,
+      Body: file.buffer,
+      ContentType: file.mimetype,
+    });
 
-      await this.s3Client.send(command);
+    await this.s3Client.send(command);
 
-      // Retornar URL pública
-      return `${this.endpoint}/${this.bucketName}/${fileName}`;
-    } catch (error) {
-      console.error('Error uploading to S3:', error);
-      throw new Error('Error al subir archivo a S3');
-    }
+    // Generar URL pre-firmada válida por 7 días
+    const getCommand = new GetObjectCommand({
+      Bucket: this.bucketName,
+      Key: fileName,
+    });
+
+    const signedUrl = await getSignedUrl(this.s3Client, getCommand, {
+      expiresIn: 604800, // 7 días en segundos
+    });
+
+    return signedUrl;
   }
 
   async deleteFile(fileUrl: string): Promise<void> {
     try {
-      const fileName = fileUrl.split(`${this.bucketName}/`)[1];
-      
-      if (!fileName) return;
+      // Extraer el Key del URL (antes del signo ?)
+      const urlParts = fileUrl.split(`${this.bucketName}/`)[1];
+      if (!urlParts) return;
 
+      const fileName = urlParts.split('?')[0]; // Quitar query params de URL firmada
+      
       const command = new DeleteObjectCommand({
         Bucket: this.bucketName,
         Key: fileName,
@@ -72,7 +77,6 @@ export class S3Service {
       await this.s3Client.send(command);
     } catch (error) {
       console.error('Error deleting file from S3:', error);
-      // No lanzar error para no bloquear la eliminación del cliente
     }
   }
 }

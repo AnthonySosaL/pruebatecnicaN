@@ -60,5 +60,6 @@ model Document {
   client        Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
   
   @@unique([clientId, type])
+  @@unique([type, documentNumber]) // Cédula/RUC único
   @@index([documentNumber])
 }

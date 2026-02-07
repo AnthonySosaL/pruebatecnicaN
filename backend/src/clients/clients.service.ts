@@ -4,13 +4,15 @@ import { S3Service } from '../s3/s3.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { QueryClientDto } from './dto/query-client.dto';
-import { ClientType } from '@prisma/client';
+import { ClientType, DocumentType } from '@prisma/client';
+import { CedulaValidatorService } from './cedula-validator.service';
 
 @Injectable()
 export class ClientsService {
   constructor(
     private prisma: PrismaService,
     private s3Service: S3Service,
+    private cedulaValidator: CedulaValidatorService,
   ) {}
 
   async create(
@@ -27,9 +29,44 @@ export class ClientsService {
       throw new ConflictException('Ya existe un cliente con este correo electrónico');
     }
 
+    // Validar documento único
+    const existingDocument = await this.prisma.document.findFirst({
+      where: {
+        documentNumber: createClientDto.documentNumber,
+        type: createClientDto.documentType,
+      },
+      include: {
+        client: true,
+      },
+    });
+
+    if (existingDocument) {
+      throw new ConflictException(
+        `El ${createClientDto.documentType === DocumentType.CEDULA ? 'número de cédula' : 'RUC'} ya está registrado para el cliente: ${existingDocument.client.name}`
+      );
+    }
+
     // Validar imágenes
     if (!frontImage) {
       throw new BadRequestException('La imagen frontal del documento es obligatoria');
+    }
+
+    // Validar cédula con servicio externo (solo para cédulas)
+    if (createClientDto.documentType === DocumentType.CEDULA) {
+      try {
+        const validation = await this.cedulaValidator.validateCedula(createClientDto.documentNumber);
+        
+        if (!validation.valid) {
+          throw new BadRequestException(`Cédula inválida: ${validation.message}`);
+        }
+      } catch (error: any) {
+        if (error instanceof BadRequestException) {
+          throw error;
+        }
+        throw new BadRequestException(
+          error.message || 'Error al validar cédula. Intente nuevamente.'
+        );
+      }
     }
 
     // Subir imágenes a S3
