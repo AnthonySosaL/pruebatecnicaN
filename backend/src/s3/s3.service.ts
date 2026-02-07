@@ -1,12 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
-import { randomUUID } from 'crypto'; // Usar crypto nativo de Node.js
+import { randomUUID } from 'crypto';
 
 @Injectable()
 export class S3Service {
   private s3Client: S3Client;
   private bucketName: string;
+  private endpoint: string;
 
   constructor(private configService: ConfigService) {
     const accessKeyId = this.configService.get<string>('S3_ACCESS_KEY_ID');
@@ -19,6 +20,9 @@ export class S3Service {
       throw new Error('Faltan variables de entorno de S3');
     }
 
+    this.endpoint = endpoint;
+    this.bucketName = bucketName;
+
     this.s3Client = new S3Client({
       region,
       endpoint,
@@ -27,31 +31,39 @@ export class S3Service {
         secretAccessKey,
       },
       forcePathStyle: true,
+      tls: true,
     });
-
-    this.bucketName = bucketName;
   }
 
   async uploadFile(file: Express.Multer.File, folder: string): Promise<string> {
     const fileExtension = file.originalname.split('.').pop();
-    const fileName = `${folder}/${randomUUID()}.${fileExtension}`; // Cambio aquí
+    const fileName = `${folder}/${randomUUID()}.${fileExtension}`;
 
-    const command = new PutObjectCommand({
-      Bucket: this.bucketName,
-      Key: fileName,
-      Body: file.buffer,
-      ContentType: file.mimetype,
-    });
+    try {
+      const command = new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: fileName,
+        Body: file.buffer,
+        ContentType: file.mimetype,
+        ACL: 'public-read', // Intentar con permisos públicos
+      });
 
-    await this.s3Client.send(command);
+      await this.s3Client.send(command);
 
-    return `${this.configService.get('S3_ENDPOINT')}/${this.bucketName}/${fileName}`;
+      // Retornar URL pública
+      return `${this.endpoint}/${this.bucketName}/${fileName}`;
+    } catch (error) {
+      console.error('Error uploading to S3:', error);
+      throw new Error('Error al subir archivo a S3');
+    }
   }
 
   async deleteFile(fileUrl: string): Promise<void> {
     try {
       const fileName = fileUrl.split(`${this.bucketName}/`)[1];
       
+      if (!fileName) return;
+
       const command = new DeleteObjectCommand({
         Bucket: this.bucketName,
         Key: fileName,
@@ -60,6 +72,7 @@ export class S3Service {
       await this.s3Client.send(command);
     } catch (error) {
       console.error('Error deleting file from S3:', error);
+      // No lanzar error para no bloquear la eliminación del cliente
     }
   }
 }
